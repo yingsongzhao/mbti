@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MBTI 性格测试</title>
+<link rel="stylesheet" href="/static/style.css?v=20260526">
+</head>
+<body>
+<div class="container">
+
+  <!-- ===== 欢迎页 ===== -->
+  <div id="welcome-screen">
+    <div class="card text-center">
+      <h1 style="font-size:28px;font-weight:700;color:var(--primary);">MBTI 性格测试</h1>
+      <p style="margin:16px 0;color:var(--text-secondary);font-size:15px;">
+        24 道梯度选择题，约 8 分钟 · 探索你的性格类型
+      </p>
+      <!-- 二维码 -->
+      <div style="margin:20px auto;display:flex;justify-content:center;">
+        <div id="qrcode" style="padding:8px;background:#fff;border-radius:8px;border:1px solid var(--border);"></div>
+      </div>
+      <p style="font-size:12px;color:var(--text-hint);margin-bottom:16px;">手机扫一扫直接开始</p>
+      <div style="margin:24px 0;">
+        <input class="input" id="name-input" type="text"
+               placeholder="请输入你的昵称" maxlength="20" required
+               style="text-align:center;max-width:300px;">
+      </div>
+      <div style="margin:16px 0;">
+        <label for="zodiac-select" style="font-size:13px;color:var(--text-secondary);display:block;margin-bottom:6px;">选择你的星座（可选，用于搭子推荐）</label>
+        <select class="input" id="zodiac-select" style="text-align:center;max-width:300px;cursor:pointer;">
+          <option value="">暂不选择</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="startTest()" style="min-width:180px;">
+        开始测试
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== 答题页 ===== -->
+  <div id="quiz-screen" style="display:none;">
+    <div class="flex-between mb-16">
+      <span style="font-size:14px;color:var(--text-secondary);">
+        第 <span id="q-current">1</span> / <span id="q-total">24</span> 题
+      </span>
+    </div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progress-bar" style="width:0%;"></div>
+    </div>
+    <div class="card" id="question-card">
+      <div class="dim-tag" id="dim-tag"></div>
+      <h2 id="question-text" style="font-size:17px;font-weight:500;line-height:1.7;margin-bottom:20px;"></h2>
+      <div id="options-area"></div>
+    </div>
+  </div>
+
+  <!-- ===== 结果页 ===== -->
+  <div id="result-screen" style="display:none;">
+    <div class="card" id="result-card"></div>
+    <div class="text-center mt-16">
+      <button class="btn btn-primary" onclick="window.location.reload()">再做一次</button>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+// ===== 生成二维码（动态获取公网地址）=====
+(async function() {
+  let publicURL = "";
+  try {
+    const res = await fetch("/api/public-url");
+    const data = await res.json();
+    publicURL = data.url || "";
+  } catch (e) { /* ignore */ }
+
+  const isPublic = !location.hostname.includes("localhost") && !location.hostname.includes("127.0.0.1");
+  const url = isPublic ? (location.protocol + "//" + location.host + "/test") : (publicURL ? publicURL + "/test" : location.protocol + "//" + location.host + "/test");
+  // 加时间戳防止 CDN/浏览器缓存
+  const urlWithTs = url + (url.includes("?") ? "&" : "?") + "_t=" + Date.now();
+
+  new QRCode(document.getElementById("qrcode"), {
+    text: urlWithTs,
+    width: 120,
+    height: 120,
+    colorDark: "#5B4FCF",
+    colorLight: "#ffffff",
+  });
+})();
+
+// ===== 全局状态 =====
+let questions = [];
+let currentIndex = 0;
+let answers = {};
+let candidateName = "";
+let candidateZodiac = "";    // 用户选择的星座 key
+let currentOptionMap = {};  // { "A": original_letter, "B": ..., "C": ... } 当前题的选项映射
+
+// ===== 加载星座列表 =====
+async function loadZodiacs() {
+  try {
+    const res = await fetch("/api/zodiacs");
+    const zodiacs = await res.json();
+    const sel = document.getElementById("zodiac-select");
+    zodiacs.forEach(z => {
+      const opt = document.createElement("option");
+      opt.value = z.key;
+      opt.textContent = `${z.emoji} ${z.name}（${z.date}）`;
+      sel.appendChild(opt);
+    });
+  } catch (e) { /* ignore */ }
+}
+
+// ===== 加载题目 =====
+async function loadQuestions() {
+  try {
+    const res = await fetch("/api/questions");
+    if (!res.ok) throw new Error("加载失败");
+    questions = await res.json();
+    // 题目顺序随机打乱
+    for (let i = questions.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [questions[i], questions[j]] = [questions[j], questions[i]];
+    }
+    document.getElementById("q-total").textContent = questions.length;
+  } catch (e) {
+    showToast("加载题目失败，请刷新页面重试");
+    console.error(e);
+  }
+}
+
+// ===== 开始测试 =====
+async function startTest() {
+  candidateName = document.getElementById("name-input").value.trim();
+  if (!candidateName) {
+    showToast("请输入昵称后再开始");
+    return;
+  }
+  candidateZodiac = document.getElementById("zodiac-select").value;
+  if (!questions.length) await loadQuestions();
+  if (!questions.length) return;
+
+  document.getElementById("welcome-screen").style.display = "none";
+  document.getElementById("quiz-screen").style.display = "block";
+  answers = {};
+  currentIndex = 0;
+  renderQuestion();
+}
+
+// ===== 渲染当前题目 =====
+function renderQuestion() {
+  const q = questions[currentIndex];
+  document.getElementById("q-current").textContent = currentIndex + 1;
+  document.getElementById("progress-bar").style.width =
+    ((currentIndex) / questions.length * 100) + "%";
+  document.getElementById("question-text").textContent = q.text;
+
+  // 维度标签
+  const dimLabels = { EI: "外向 E vs 内向 I", NS: "直觉 N vs 实感 S",
+                      FT: "情感 F vs 思考 T", JP: "判断 J vs 感知 P" };
+  document.getElementById("dim-tag").textContent = dimLabels[q.dimension] || "";
+
+  // 选项按钮（获取所有选项键，打乱顺序，始终以 A/B/C 标签显示）
+  const area = document.getElementById("options-area");
+  area.innerHTML = "";
+  area.style.display = "flex";
+  area.style.flexDirection = "column";
+  area.style.gap = "10px";
+
+  const optionKeys = Object.keys(q).filter(k => k.startsWith("option_"));
+  // Fisher-Yates 洗牌
+  for (let i = optionKeys.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [optionKeys[i], optionKeys[j]] = [optionKeys[j], optionKeys[i]];
+  }
+
+  // 建立显示标签 → 原始选项字母的映射
+  const displayLabels = ["A", "B", "C"];
+  currentOptionMap = {};
+  optionKeys.forEach((key, idx) => {
+    const origLetter = key.replace("option_", "").toUpperCase();
+    currentOptionMap[displayLabels[idx]] = origLetter;
+  });
+
+  optionKeys.forEach((key, idx) => {
+    const label = displayLabels[idx];
+    const btn = document.createElement("button");
+    btn.className = "option-card";
+    btn.innerHTML = `<span class="option-label">${label}</span>${q[key]}`;
+    btn.onclick = () => selectOption(q.id, label);
+    area.appendChild(btn);
+  });
+}
+
+// ===== 选择选项 =====
+function selectOption(qid, displayLabel) {
+  // 将显示标签 A/B/C 映射回原始选项字母
+  const originalLetter = currentOptionMap[displayLabel] || displayLabel;
+  answers[qid] = originalLetter;
+
+  if (currentIndex < questions.length - 1) {
+    currentIndex++;
+    window.scrollTo(0, 0);
+    renderQuestion();
+  } else {
+    // 完成全部题目
+    document.getElementById("progress-bar").style.width = "100%";
+    submitAnswers();
+  }
+}
+
+// ===== 提交答案 =====
+async function submitAnswers() {
+  document.getElementById("quiz-screen").style.display = "none";
+  // 显示加载态
+  const card = document.getElementById("result-card");
+  card.innerHTML = `<div class="text-center" style="padding:40px;">
+    <p style="font-size:16px;color:var(--text-secondary);">正在计算结果...</p>
+  </div>`;
+  document.getElementById("result-screen").style.display = "block";
+
+  try {
+    const res = await fetch("/api/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ candidate: candidateName, zodiac: candidateZodiac, answers }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "提交失败");
+    }
+    const data = await res.json();
+    renderResult(data);
+  } catch (e) {
+    showToast(e.message || "提交失败，请重试");
+    setTimeout(() => { document.getElementById("quiz-screen").style.display = "block"; }, 1500);
+    document.getElementById("result-screen").style.display = "none";
+  }
+}
+
+// ===== 展示结果 =====
+function renderResult(data) {
+  const { mbti_type, description, scores, strengths, careers, celebrities, buddies } = data;
+  const dims = [
+    { left: "E", ls: scores.e_score, right: "I", rs: scores.i_score },
+    { left: "N", ls: scores.n_score, right: "S", rs: scores.s_score },
+    { left: "F", ls: scores.f_score, right: "T", rs: scores.t_score },
+    { left: "J", ls: scores.j_score, right: "P", rs: scores.p_score },
+  ];
+
+  let dimBars = dims.map(d => {
+    const max = d.ls + d.rs || 1;
+    const lpct = Math.round(d.ls / max * 100);
+    return `<div class="dim-row">
+      <span class="dim-left">${d.ls} ${d.left}</span>
+      <div class="dim-bar-wrap">
+        <div class="dim-bar-left" style="width:${lpct}%;"></div>
+        <div class="dim-bar-right" style="width:${100-lpct}%;"></div>
+      </div>
+      <span class="dim-right">${d.right} ${d.rs}</span>
+    </div>`;
+  }).join("");
+
+  const typeChars = mbti_type.split("");
+  const typeDisplay = typeChars.map((c, i) => {
+    const colors = ["#5B4FCF", "#1D9E75", "#D4537E", "#BA7517"];
+    return `<span style="color:${colors[i]};font-weight:700;">${c}</span>`;
+  }).join("");
+
+  const strengthsTags = (strengths || []).map(s =>
+    `<span class="tag tag-strength">${s}</span>`
+  ).join("");
+
+  const careerTags = (careers || []).map(c =>
+    `<span class="tag tag-career">${c}</span>`
+  ).join("");
+
+  const celebCards = (celebrities || []).map(c =>
+    `<div class="celeb-card">
+      <strong>${c.name}</strong>
+      <span style="color:var(--text-secondary);font-size:13px;">${c.note}</span>
+    </div>`
+  ).join("");
+
+  // ===== 搭子推荐模块 =====
+  let buddyHTML = "";
+  if (buddies && buddies.user_zodiac && buddies.user_zodiac.key) {
+    const uz = buddies.user_zodiac;
+    const zBuddies = buddies.zodiac_buddies || [];
+    const mBuddies = buddies.mbti_buddies || [];
+    const cBuddies = buddies.combined_buddies || [];
+
+    // 星座搭子列表
+    const zList = zBuddies.map(b => {
+      const mbtiTags = (b.typical_mbti || []).map(t => `<span style="font-size:11px;background:#E8E6F5;color:#5B4FCF;padding:2px 6px;border-radius:4px;margin-left:4px;">${t}</span>`).join("");
+      return `<div class="buddy-item">
+        <span style="font-size:20px;">${b.emoji}</span>
+        <div style="flex:1;">
+          <strong>${b.name}</strong>
+          <span style="color:var(--text-secondary);font-size:12px;display:block;">${b.traits}</span>
+        </div>
+        <div>${mbtiTags}</div>
+      </div>`;
+    }).join("");
+
+    // MBTI 搭子列表
+    const mList = mBuddies.map(b => {
+      const zodiacTags = (b.typical_zodiac || []).slice(0, 2).map(z => {
+        const info = buddies.user_zodiac ? {} : {};
+        return `<span style="font-size:11px;background:#FFF3E6;color:#BA7517;padding:2px 6px;border-radius:4px;margin-left:4px;">${z}</span>`;
+      }).join("");
+      return `<div class="buddy-item">
+        <span class="mbti-badge" style="background:var(--primary);color:#fff;padding:4px 10px;border-radius:6px;font-weight:700;font-size:14px;">${b.type}</span>
+        <div style="flex:1;margin-left:8px;">
+          <span style="font-size:13px;color:var(--text-secondary);">${b.label}</span>
+        </div>
+        <div>${zodiacTags}</div>
+      </div>`;
+    }).join("");
+
+    // 综合搭子 TOP 5
+    const cList = cBuddies.map((b, i) => {
+      const scoreBar = `<span style="font-size:12px;color:var(--primary);font-weight:600;">匹配度 ${"★".repeat(Math.min(b.score, 5))}${"☆".repeat(Math.max(0, 5 - b.score))}</span>`;
+      const reasons = (b.reasons || []).map(r => `<span style="font-size:11px;background:#E8F5ED;color:#1D9E75;padding:2px 6px;border-radius:4px;">${r}</span>`).join(" ");
+      const mbtiTags = (b.typical_mbti || []).map(t => `<span class="tag tag-strength" style="font-size:10px;padding:2px 6px;">${t}</span>`).join("");
+      return `<div class="buddy-item combined" style="border-left:3px solid var(--primary);">
+        <span style="font-size:22px;">${b.emoji}</span>
+        <div style="flex:1;">
+          <strong>${b.name}</strong> ${scoreBar}
+          <div style="margin-top:4px;">${reasons}</div>
+          <div style="margin-top:4px;">${mbtiTags}</div>
+        </div>
+      </div>`;
+    }).join("");
+
+    buddyHTML = `
+      <div class="buddy-section">
+        <h3 class="buddy-title">🐾 你的搭子推荐</h3>
+        <p class="buddy-subtitle">${uz.emoji} ${uz.name}（${uz.element}象星座）${mbti_type} — 综合星座+MBTI 双重分析</p>
+
+        ${cBuddies.length ? `
+        <div style="margin-bottom:20px;">
+          <h4 style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:10px;">🏆 最佳搭子 TOP 5（星座+MBTI双维度匹配）</h4>
+          <div style="display:flex;flex-direction:column;gap:8px;">${cList}</div>
+        </div>` : ""}
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div>
+            <h4 style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:10px;">✨ 星座契合搭子</h4>
+            <div style="display:flex;flex-direction:column;gap:8px;">${zList}</div>
+          </div>
+          <div>
+            <h4 style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:10px;">🧠 MBTI 契合搭子</h4>
+            <div style="display:flex;flex-direction:column;gap:8px;">${mList}</div>
+          </div>
+        </div>
+      </div>`;
+  } else {
+    // 未选星座，只显示 MBTI 搭子
+    const mBuddies = (buddies && buddies.mbti_buddies) || [];
+    const mList = mBuddies.map(b => {
+      return `<div class="buddy-item">
+        <span class="mbti-badge" style="background:var(--primary);color:#fff;padding:4px 10px;border-radius:6px;font-weight:700;font-size:14px;">${b.type}</span>
+        <div style="flex:1;margin-left:8px;">
+          <span style="font-size:13px;color:var(--text-secondary);">${b.label}</span>
+        </div>
+      </div>`;
+    }).join("");
+
+    buddyHTML = `
+      <div class="buddy-section">
+        <h3 class="buddy-title">🐾 你的 MBTI 搭子推荐</h3>
+        <p class="buddy-subtitle">${mbti_type} 最契合的性格类型（选填星座可解锁星座搭子）</p>
+        <div style="display:flex;flex-direction:column;gap:8px;">${mList}</div>
+      </div>`;
+  }
+
+  document.getElementById("result-card").innerHTML = `
+    <div class="text-center" style="margin-bottom:10px;">
+      <span style="font-size:14px;color:var(--text-secondary);">${data.candidate} 的性格类型</span>
+    </div>
+    <div class="result-type">${typeDisplay}</div>
+    <div class="result-desc">${description}</div>
+
+    <div style="background:#FAFAFD;border-radius:var(--radius-sm);padding:24px;margin:20px 0;">
+      <div class="text-center mb-16" style="font-size:14px;font-weight:500;">各维度得分</div>
+      ${dimBars}
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <h3 style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:10px;">擅长领域</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">${strengthsTags}</div>
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <h3 style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:10px;">适合职业</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">${careerTags}</div>
+    </div>
+
+    <div style="margin-bottom:8px;">
+      <h3 style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:10px;">吻合度较高的名人</h3>
+      <div style="display:flex;flex-direction:column;gap:8px;">${celebCards}</div>
+    </div>
+
+    ${buddyHTML}
+  `;
+}
+
+// ===== Toast 提示 =====
+function showToast(msg) {
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+// ===== 页面加载 =====
+loadQuestions();
+loadZodiacs();
+</script>
+</body>
+</html>

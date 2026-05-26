@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理后台 - MBTI 统计</title>
+<link rel="stylesheet" href="/static/style.css?v=20260526">
+</head>
+<body>
+<div class="container">
+
+  <!-- ===== 登录页 ===== -->
+  <div id="login-screen">
+    <div class="login-box">
+      <h1 style="font-size:24px;font-weight:700;color:var(--primary);">MBTI 管理后台</h1>
+      <p style="color:var(--text-secondary);margin:8px 0 20px;">请输入管理员密码查看统计数据</p>
+      <input class="input" id="password-input" type="password"
+             placeholder="管理员密码" onkeydown="if(event.key==='Enter')login()">
+      <button class="btn btn-primary" onclick="login()" style="width:100%;">进入后台</button>
+      <p id="login-error" style="color:var(--danger);font-size:13px;margin-top:12px;display:none;"></p>
+    </div>
+  </div>
+
+  <!-- ===== 仪表盘 ===== -->
+  <div id="dashboard-screen" style="display:none;">
+    <div class="flex-between mb-16">
+      <h2 style="font-size:20px;font-weight:500;">MBTI 统计数据</h2>
+      <button class="btn btn-outline" onclick="logout()" style="font-size:13px;padding:8px 16px;">退出</button>
+    </div>
+
+    <!-- 概览卡片 -->
+    <div class="stats-cards" id="overview-cards"></div>
+
+    <!-- 类型分布图 -->
+    <div class="card">
+      <div class="chart-title">16 型人格分布</div>
+      <div id="type-chart">
+        <p class="text-hint text-center" style="padding:20px;">暂无数据</p>
+      </div>
+    </div>
+
+    <!-- 维度分布 -->
+    <div class="card mt-16">
+      <div class="chart-title">四大维度比例</div>
+      <div id="dim-chart">
+        <p class="text-hint text-center" style="padding:20px;">暂无数据</p>
+      </div>
+    </div>
+
+    <!-- 结果列表 -->
+    <div class="card mt-16">
+      <div class="flex-between mb-16">
+        <span class="chart-title" style="margin:0;">候选人结果明细</span>
+        <button class="btn btn-outline" onclick="exportCSV()" style="font-size:12px;padding:6px 12px;">导出 CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table id="results-table">
+          <thead>
+            <tr>
+              <th>姓名</th>
+              <th>类型</th>
+              <th>E/I</th>
+              <th>N/S</th>
+              <th>F/T</th>
+              <th>J/P</th>
+              <th>时间</th>
+            </tr>
+          </thead>
+          <tbody id="results-body">
+            <tr><td colspan="7" class="text-center text-hint">暂无数据</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let adminPwd = "";
+
+// ===== 登录 =====
+async function login() {
+  const pwd = document.getElementById("password-input").value.trim();
+  if (!pwd) return;
+
+  try {
+    const res = await fetch(`/api/stats/types?password=${encodeURIComponent(pwd)}`);
+    if (!res.ok) {
+      document.getElementById("login-error").textContent = "密码错误";
+      document.getElementById("login-error").style.display = "block";
+      return;
+    }
+    adminPwd = pwd;
+    document.getElementById("login-screen").style.display = "none";
+    document.getElementById("dashboard-screen").style.display = "block";
+    document.getElementById("login-error").style.display = "none";
+    loadDashboard();
+  } catch (e) {
+    document.getElementById("login-error").textContent = "连接失败，请检查服务是否启动";
+    document.getElementById("login-error").style.display = "block";
+  }
+}
+
+// ===== 退出 =====
+function logout() {
+  adminPwd = "";
+  document.getElementById("login-screen").style.display = "block";
+  document.getElementById("dashboard-screen").style.display = "none";
+  document.getElementById("password-input").value = "";
+}
+
+// ===== 加载仪表盘 =====
+async function loadDashboard() {
+  try {
+    const [typesRes, dimsRes, resultsRes] = await Promise.all([
+      fetch(`/api/stats/types?password=${encodeURIComponent(adminPwd)}`),
+      fetch(`/api/stats/dimensions?password=${encodeURIComponent(adminPwd)}`),
+      fetch(`/api/stats/results?password=${encodeURIComponent(adminPwd)}`),
+    ]);
+
+    const types = typesRes.ok ? await typesRes.json() : [];
+    const dims = dimsRes.ok ? await dimsRes.json() : null;
+    const results = resultsRes.ok ? await resultsRes.json() : [];
+
+    renderOverview(types, dims);
+    renderTypeChart(types);
+    renderDimChart(dims);
+    renderResultsTable(results);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// ===== 概览卡片 =====
+function renderOverview(types, dims) {
+  const total = types.reduce((s, t) => s + t.count, 0);
+  const todayCount = 0; // 简化：不区分今日
+  const topType = types.length > 0 ? types[0].mbti_type : "-";
+
+  document.getElementById("overview-cards").innerHTML = `
+    <div class="stat-card">
+      <div class="stat-num">${total}</div>
+      <div class="stat-label">总测试人数</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num" style="font-size:28px;letter-spacing:3px;">${topType}</div>
+      <div class="stat-label">最多的人格类型</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num">${types.length}</div>
+      <div class="stat-label">已出现类型数 (共16)</div>
+    </div>
+  `;
+}
+
+// ===== 类型分布图 =====
+function renderTypeChart(types) {
+  if (!types.length) {
+    document.getElementById("type-chart").innerHTML =
+      '<p class="text-hint text-center" style="padding:20px;">暂无数据</p>';
+    return;
+  }
+  const max = types[0].count;
+  const html = types.map(t => {
+    const pct = Math.round(t.count / max * 100);
+    return `<div class="bar-item">
+      <span class="bar-type">${t.mbti_type}</span>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:${pct}%;${t.mbti_type === types[0].mbti_type ? 'background:var(--primary);' : 'opacity:0.6;'}"></div>
+      </div>
+      <span class="bar-count">${t.count}</span>
+    </div>`;
+  }).join("");
+  document.getElementById("type-chart").innerHTML = html;
+}
+
+// ===== 维度分布图 =====
+function renderDimChart(dims) {
+  if (!dims) {
+    document.getElementById("dim-chart").innerHTML =
+      '<p class="text-hint text-center" style="padding:20px;">暂无数据</p>';
+    return;
+  }
+
+  const dimPairs = [
+    { left: "E", ls: dims.avg_e, right: "I", rs: dims.avg_i },
+    { left: "N", ls: dims.avg_n, right: "S", rs: dims.avg_s },
+    { left: "F", ls: dims.avg_f, right: "T", rs: dims.avg_t },
+    { left: "J", ls: dims.avg_j, right: "P", rs: dims.avg_p },
+  ];
+
+  const html = dimPairs.map(d => {
+    const max = d.ls + d.rs || 1;
+    const lpct = Math.round(d.ls / max * 100);
+    const lp = d.ls.toFixed(1);
+    const rp = d.rs.toFixed(1);
+    return `<div class="dim-row">
+      <span class="dim-left">${lp} ${d.left}</span>
+      <div class="dim-bar-wrap">
+        <div class="dim-bar-left" style="width:${lpct}%;"></div>
+        <div class="dim-bar-right" style="width:${100-lpct}%;"></div>
+      </div>
+      <span class="dim-right">${d.right} ${rp}</span>
+    </div>`;
+  }).join("");
+
+  document.getElementById("dim-chart").innerHTML = `
+    <div style="padding:12px 0;">${html}</div>
+    <p class="text-hint" style="margin-top:8px;text-align:center;">
+      共 ${dims.total} 人，以上为各维度平均分
+    </p>`;
+}
+
+// ===== 结果表格 =====
+function renderResultsTable(results) {
+  const tbody = document.getElementById("results-body");
+  if (!results.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-hint">暂无数据</td></tr>';
+    return;
+  }
+
+  const dimLabels = (s) => {
+    const items = [];
+    if (s.e_score >= s.i_score) items.push(`E${s.e_score}`); else items.push(`I${s.i_score}`);
+    if (s.n_score >= s.s_score) items.push(`N${s.n_score}`); else items.push(`S${s.s_score}`);
+    if (s.f_score >= s.t_score) items.push(`F${s.f_score}`); else items.push(`T${s.t_score}`);
+    if (s.j_score >= s.p_score) items.push(`J${s.j_score}`); else items.push(`P${s.p_score}`);
+    return items.join(" ");
+  };
+
+  const typeColor = (t) => {
+    const m = { "ENFJ": "#5B4FCF", "INTJ": "#185FA5", "ESFJ": "#D4537E", "ISTJ": "#639922" };
+    return m[t] || "#5B4FCF";
+  };
+
+  tbody.innerHTML = results.map(r => `
+    <tr>
+      <td>${r.candidate}</td>
+      <td><strong style="color:${typeColor(r.mbti_type)};">${r.mbti_type}</strong></td>
+      <td style="font-size:13px;">${r.e_score}/${r.i_score}</td>
+      <td style="font-size:13px;">${r.n_score}/${r.s_score}</td>
+      <td style="font-size:13px;">${r.f_score}/${r.t_score}</td>
+      <td style="font-size:13px;">${r.j_score}/${r.p_score}</td>
+      <td style="font-size:13px;color:var(--text-secondary);">${r.created_at}</td>
+    </tr>
+  `).join("");
+}
+
+// ===== 导出 CSV =====
+async function exportCSV() {
+  try {
+    const res = await fetch(`/api/stats/results?password=${encodeURIComponent(adminPwd)}`);
+    const data = await res.json();
+    if (!data.length) { alert("暂无数据可导出"); return; }
+
+    const header = "姓名,MBTI类型,E分,I分,N分,S分,F分,T分,J分,P分,时间\n";
+    const rows = data.map(r =>
+      `${r.candidate},${r.mbti_type},${r.e_score},${r.i_score},` +
+      `${r.n_score},${r.s_score},${r.f_score},${r.t_score},` +
+      `${r.j_score},${r.p_score},${r.created_at}`
+    ).join("\n");
+
+    const BOM = "\uFEFF";
+    const blob = new Blob([BOM + header + rows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `mbti_results_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert("导出失败");
+  }
+}
+</script>
+</body>
+</html>
