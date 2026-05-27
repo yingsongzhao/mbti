@@ -45,9 +45,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-访问 http://localhost:8000/test
 
-管理后台 http://localhost:8000/admin（默认密码: admin123）
 
 ## 部署到阿里云
 
