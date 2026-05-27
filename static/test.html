@@ -27,7 +27,7 @@
                style="text-align:center;max-width:300px;">
       </div>
       <div style="margin:16px 0;">
-        <label for="zodiac-select" style="font-size:13px;color:var(--text-secondary);display:block;margin-bottom:6px;">选择你的星座（可选，用于搭子推荐）</label>
+        <label for="zodiac-select" style="font-size:13px;color:var(--text-secondary);display:block;margin-bottom:6px;">选择你的星座（可选）</label>
         <select class="input" id="zodiac-select" style="text-align:center;max-width:300px;cursor:pointer;">
           <option value="">暂不选择</option>
         </select>
@@ -242,7 +242,7 @@ async function submitAnswers() {
 
 // ===== 展示结果 =====
 function renderResult(data) {
-  const { mbti_type, description, scores, strengths, careers, celebrities, buddies } = data;
+  const { mbti_type, description, scores, strengths, careers, hobbies, celebrities, buddies } = data;
   const dims = [
     { left: "E", ls: scores.e_score, right: "I", rs: scores.i_score },
     { left: "N", ls: scores.n_score, right: "S", rs: scores.s_score },
@@ -277,105 +277,16 @@ function renderResult(data) {
     `<span class="tag tag-career">${c}</span>`
   ).join("");
 
+  const hobbyTags = (hobbies || []).map(h =>
+    `<span class="tag tag-hobby">${h}</span>`
+  ).join("");
+
   const celebCards = (celebrities || []).map(c =>
     `<div class="celeb-card">
       <strong>${c.name}</strong>
       <span style="color:var(--text-secondary);font-size:13px;">${c.note}</span>
     </div>`
   ).join("");
-
-  // ===== 搭子推荐模块 =====
-  let buddyHTML = "";
-  if (buddies && buddies.user_zodiac && buddies.user_zodiac.key) {
-    const uz = buddies.user_zodiac;
-    const zBuddies = buddies.zodiac_buddies || [];
-    const mBuddies = buddies.mbti_buddies || [];
-    const cBuddies = buddies.combined_buddies || [];
-
-    // 星座搭子列表
-    const zList = zBuddies.map(b => {
-      const mbtiTags = (b.typical_mbti || []).map(t => `<span style="font-size:11px;background:#E8E6F5;color:#5B4FCF;padding:2px 6px;border-radius:4px;margin-left:4px;">${t}</span>`).join("");
-      return `<div class="buddy-item">
-        <span style="font-size:20px;">${b.emoji}</span>
-        <div style="flex:1;">
-          <strong>${b.name}</strong>
-          <span style="color:var(--text-secondary);font-size:12px;display:block;">${b.traits}</span>
-        </div>
-        <div>${mbtiTags}</div>
-      </div>`;
-    }).join("");
-
-    // MBTI 搭子列表
-    const mList = mBuddies.map(b => {
-      const zodiacTags = (b.typical_zodiac || []).slice(0, 2).map(z => {
-        const info = buddies.user_zodiac ? {} : {};
-        return `<span style="font-size:11px;background:#FFF3E6;color:#BA7517;padding:2px 6px;border-radius:4px;margin-left:4px;">${z}</span>`;
-      }).join("");
-      return `<div class="buddy-item">
-        <span class="mbti-badge" style="background:var(--primary);color:#fff;padding:4px 10px;border-radius:6px;font-weight:700;font-size:14px;">${b.type}</span>
-        <div style="flex:1;margin-left:8px;">
-          <span style="font-size:13px;color:var(--text-secondary);">${b.label}</span>
-        </div>
-        <div>${zodiacTags}</div>
-      </div>`;
-    }).join("");
-
-    // 综合搭子 TOP 5
-    const cList = cBuddies.map((b, i) => {
-      const scoreBar = `<span style="font-size:12px;color:var(--primary);font-weight:600;">匹配度 ${"★".repeat(Math.min(b.score, 5))}${"☆".repeat(Math.max(0, 5 - b.score))}</span>`;
-      const reasons = (b.reasons || []).map(r => `<span style="font-size:11px;background:#E8F5ED;color:#1D9E75;padding:2px 6px;border-radius:4px;">${r}</span>`).join(" ");
-      const mbtiTags = (b.typical_mbti || []).map(t => `<span class="tag tag-strength" style="font-size:10px;padding:2px 6px;">${t}</span>`).join("");
-      return `<div class="buddy-item combined" style="border-left:3px solid var(--primary);">
-        <span style="font-size:22px;">${b.emoji}</span>
-        <div style="flex:1;">
-          <strong>${b.name}</strong> ${scoreBar}
-          <div style="margin-top:4px;">${reasons}</div>
-          <div style="margin-top:4px;">${mbtiTags}</div>
-        </div>
-      </div>`;
-    }).join("");
-
-    buddyHTML = `
-      <div class="buddy-section">
-        <h3 class="buddy-title">🐾 你的搭子推荐</h3>
-        <p class="buddy-subtitle">${uz.emoji} ${uz.name}（${uz.element}象星座）${mbti_type} — 综合星座+MBTI 双重分析</p>
-
-        ${cBuddies.length ? `
-        <div style="margin-bottom:20px;">
-          <h4 style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:10px;">🏆 最佳搭子 TOP 5（星座+MBTI双维度匹配）</h4>
-          <div style="display:flex;flex-direction:column;gap:8px;">${cList}</div>
-        </div>` : ""}
-
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-          <div>
-            <h4 style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:10px;">✨ 星座契合搭子</h4>
-            <div style="display:flex;flex-direction:column;gap:8px;">${zList}</div>
-          </div>
-          <div>
-            <h4 style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:10px;">🧠 MBTI 契合搭子</h4>
-            <div style="display:flex;flex-direction:column;gap:8px;">${mList}</div>
-          </div>
-        </div>
-      </div>`;
-  } else {
-    // 未选星座，只显示 MBTI 搭子
-    const mBuddies = (buddies && buddies.mbti_buddies) || [];
-    const mList = mBuddies.map(b => {
-      return `<div class="buddy-item">
-        <span class="mbti-badge" style="background:var(--primary);color:#fff;padding:4px 10px;border-radius:6px;font-weight:700;font-size:14px;">${b.type}</span>
-        <div style="flex:1;margin-left:8px;">
-          <span style="font-size:13px;color:var(--text-secondary);">${b.label}</span>
-        </div>
-      </div>`;
-    }).join("");
-
-    buddyHTML = `
-      <div class="buddy-section">
-        <h3 class="buddy-title">🐾 你的 MBTI 搭子推荐</h3>
-        <p class="buddy-subtitle">${mbti_type} 最契合的性格类型（选填星座可解锁星座搭子）</p>
-        <div style="display:flex;flex-direction:column;gap:8px;">${mList}</div>
-      </div>`;
-  }
 
   document.getElementById("result-card").innerHTML = `
     <div class="text-center" style="margin-bottom:10px;">
@@ -399,12 +310,51 @@ function renderResult(data) {
       <div style="display:flex;flex-wrap:wrap;gap:6px;">${careerTags}</div>
     </div>
 
+    <div style="margin-bottom:16px;">
+      <h3 style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:10px;">推荐兴趣</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">${hobbyTags}</div>
+    </div>
+
     <div style="margin-bottom:8px;">
       <h3 style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:10px;">吻合度较高的名人</h3>
       <div style="display:flex;flex-direction:column;gap:8px;">${celebCards}</div>
     </div>
 
-    ${buddyHTML}
+    ${renderBuddySection(buddies)}
+  `;
+}
+
+// ===== 搭子推荐模块 =====
+function renderBuddySection(buddies) {
+  if (!buddies || !buddies.user_zodiac || !buddies.user_zodiac.key) return "";
+
+  const cBuddies = buddies.combined_buddies || [];
+  if (!cBuddies.length) return "";
+
+  const cList = cBuddies.map((b) => {
+    const scoreBar =
+      `<span style="font-size:12px;color:var(--primary);font-weight:600;">匹配度 ${"★".repeat(Math.min(b.score, 5))}${"☆".repeat(Math.max(0, 5 - b.score))}</span>`;
+    const reasons = (b.reasons || [])
+      .map(r => `<span style="font-size:11px;background:#E8F5ED;color:#1D9E75;padding:2px 6px;border-radius:4px;">${r}</span>`)
+      .join(" ");
+    const mbtiTags = (b.typical_mbti || [])
+      .map(t => `<span class="tag tag-strength" style="font-size:10px;padding:2px 6px;">${t}</span>`)
+      .join("");
+    return `<div class="buddy-item combined" style="border-left:3px solid var(--primary);">
+      <span style="font-size:22px;">${b.emoji}</span>
+      <div style="flex:1;">
+        <strong>${b.name}</strong> ${scoreBar}
+        <div style="margin-top:4px;">${reasons}</div>
+        <div style="margin-top:4px;">${mbtiTags}</div>
+      </div>
+    </div>`;
+  }).join("");
+
+  return `
+    <div class="buddy-section" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);">
+      <h3 style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:10px;">🏆 最佳搭子 TOP 5（星座+MBTI 双维度匹配）</h3>
+      <div style="display:flex;flex-direction:column;gap:8px;">${cList}</div>
+    </div>
   `;
 }
 

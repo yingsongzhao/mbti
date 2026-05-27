@@ -349,6 +349,10 @@ td {
   background: #E6F7EF;
   color: #1D9E75;
 }
+.tag-hobby {
+  background: #FFF3E0;
+  color: #BA7517;
+}
 
 /* 名人卡片 */
 .celeb-card {
