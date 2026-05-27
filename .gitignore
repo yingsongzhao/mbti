@@ -7,3 +7,9 @@ public-url.txt
 .workbuddy/
 *.bat
 ~cloudflared/
+.claude/
+deploy.sh
+launcher.py
+setup-https.sh
+upload.bat
+main.py.bak

@@ -2,6 +2,10 @@
 
 import os
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+# 加载 .env 文件（本地开发用；生产环境由 systemd EnvironmentFile 注入）
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
@@ -103,6 +107,7 @@ async def submit(request: SubmitRequest):
         "description": desc["summary"],
         "strengths": desc["strengths"],
         "careers": desc["careers"],
+        "hobbies": desc["hobbies"],
         "celebrities": desc["celebrities"],
         "scores": scores,
         "buddies": get_buddy_recommendations(request.zodiac, mbti_type),
@@ -121,6 +126,11 @@ async def get_zodiacs():
 @app.get("/api/public-url")
 async def public_url():
     """返回当前公网访问地址（供 QR 码使用）"""
+    # 优先读取环境变量
+    env_url = os.environ.get("PUBLIC_URL", "").strip()
+    if env_url:
+        return {"url": env_url}
+    # 其次读取文件
     try:
         with open("public-url.txt", "r", encoding="utf-8") as f:
             url = f.read().strip()
